@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>客戶來信判讀小幫手</title>
+<style>
+  :root{
+    --bg:#f4f6f9; --card:#ffffff; --ink:#1c2733; --muted:#66737f;
+    --brand:#0f6bff; --brand-soft:#e8f0ff; --line:#e3e8ee;
+    --ok:#1a9a5e; --warn:#b4541b; --red:#d33;
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0; padding:0 0 64px 0; background:var(--bg); color:var(--ink);
+    font-family:-apple-system,"Segoe UI","Microsoft JhengHei",Roboto,Helvetica,Arial,sans-serif;
+    line-height:1.6;
+  }
+  .wrap{max-width:760px; margin:0 auto; padding:16px;}
+  header.card{
+    background:linear-gradient(135deg,#0f6bff,#3b8bff); color:#fff; border-radius:14px;
+    padding:18px 20px; margin:14px 0;
+  }
+  header.card h1{margin:0 0 4px; font-size:20px;}
+  header.card p{margin:0; font-size:13px; opacity:.92;}
+  .card{background:var(--card); border:1px solid var(--line); border-radius:14px; padding:16px; margin:12px 0; box-shadow:0 1px 3px rgba(0,0,0,.04);}
+  .card h2{font-size:15px; margin:0 0 10px; display:flex; align-items:center; gap:8px;}
+  .card h2 .badge{background:var(--brand-soft); color:var(--brand); font-weight:700; border-radius:8px; padding:1px 8px; font-size:12px;}
+  .samples{display:flex; flex-wrap:wrap; gap:8px; margin-bottom:10px;}
+  .samples button{
+    flex:1 1 auto; min-width:140px; padding:10px 10px; font-size:13px; cursor:pointer;
+    border:1px solid var(--line); background:#fff; color:var(--ink); border-radius:10px;
+  }
+  .samples button:hover{background:var(--brand-soft); border-color:var(--brand);}
+  textarea{
+    width:100%; min-height:180px; padding:12px; font-size:14px; resize:vertical;
+    border:1px solid var(--line); border-radius:10px; font-family:inherit;
+  }
+  textarea:focus{outline:none; border-color:var(--brand);}
+  .actions{display:flex; gap:8px; margin-top:10px;}
+  #go{
+    flex:1; padding:13px; font-size:15px; font-weight:700; color:#fff; background:var(--brand);
+    border:none; border-radius:10px; cursor:pointer;
+  }
+  #go:hover{background:#0a5ad9;}
+  #clear{ padding:13px 16px; font-size:14px; background:#fff; border:1px solid var(--line); border-radius:10px; cursor:pointer;}
+  #clear:hover{background:#f2f5f8;}
+  .hint{font-size:12px; color:var(--muted); margin-top:8px;}
+  .result{display:none;}
+  .result.show{display:block;}
+  .out-block{margin:12px 0 0; padding:12px; border-radius:10px; background:#fafbfd; border:1px solid var(--line);}
+  .out-block h3{margin:0 0 8px; font-size:14px;}
+  .out-block ul{margin:4px 0; padding-left:20px;}
+  .out-block li{margin:4px 0;}
+  .missing li{color:var(--warn);}
+  .missing li.found{color:var(--ok); text-decoration:line-through; opacity:.7;}
+  .skeleton{white-space:pre-wrap; font-size:14px;}
+  .caution-line{color:var(--warn); font-weight:600;}
+  /* 固定底部紅字 */
+  .fixed-foot{
+    position:fixed; left:0; right:0; bottom:0; z-index:50;
+    background:#fff; border-top:2px solid var(--red);
+    text-align:center; padding:9px 12px; font-size:13px; font-weight:700; color:var(--red);
+    box-shadow:0 -1px 4px rgba(0,0,0,.06);
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="card">
+    <h1>客戶來信判讀小幫手</h1>
+    <p>貼上海外客戶詢價信 → 按「判讀」→ 產生：問了什麼 / 尚缺資料 / 回信骨架。純關鍵字判讀，不需連網、不呼叫 AI。</p>
+  </header>
+
+  <div class="card">
+    <h2><span class="badge">試</span>點選範例信（可再貼自己的）</h2>
+    <div class="samples">
+      <button data-sample="s1">範例① 德國代理商</button>
+      <button data-sample="s2">範例② 美國 OEM</button>
+      <button data-sample="s3">範例③ 杜拜大型案</button>
+    </div>
+    <h2><span class="badge">貼</span>客戶來信</h2>
+    <textarea id="input" placeholder="把客戶來信貼在這裡……"></textarea>
+    <div class="actions">
+      <button id="go">判讀</button>
+      <button id="clear">清空</button>
+    </div>
+    <div class="hint">鍵入 Ctrl/Meta + Enter 也可快速判讀。</div>
+  </div>
+
+  <div class="card result" id="result">
+    <h2><span class="badge">結果</span>判讀結果</h2>
+    <div class="out-block" id="b-what"></div>
+    <div class="out-block" id="b-missing"></div>
+    <div class="out-block" id="b-skeleton"></div>
+  </div>
+</div>
+
+<div class="fixed-foot">交期、價格、認證範圍由負責同仁確認後才對外</div>
+
+<script>
+"use strict";
+/* ---------------- 範例信 ---------------- */
+var SAMPLES = {
+  s1: "您好，我們是德國的工業零組件代理商，看到貴公司的衛浴五金件，想了解能否供應給我們在德國的客戶。請問需要準備哪些認證文件？大概多久可以出貨？",
+  s2: "Hello, we would like to carry your LX-350 under our own brand for the US retail market. Please provide copies of your NSF/ANSI 61 and 372 certificates. We expect an initial order of 3,000 units within 6 months. Could you also quote pricing and confirm lead time?",
+  s3: "你好，我們是杜拜的建材商，有一個酒店大型工程案，需要一批衛浴龍頭，請提供報價並說明付款條件，期望明年第一季出貨。"
+};
+
+/* ---------------- 判讀條件 ---------------- */
+var COUNTRIES = {
+  "德國":"德國","germany":"德國","英國":"英國","uk":"英國","united kingdom":"英國","britain":"英國",
+  "美國":"美國","us":"美國","usa":"美國","united states":"美國","america":"美國",
+  "日本":"日本","japan":"日本","澳洲":"澳洲","australia":"澳洲","法國":"法國","france":"法國",
+  "義大利":"義大利","italy":"義大利","西班牙":"西班牙","spain":"西班牙","瑞典":"瑞典","sweden":"瑞典",
+  "荷蘭":"荷蘭","netherlands":"荷蘭","比利時":"比利時","belgium":"比利時","丹麥":"丹麥","denmark":"丹麥",
+  "挪威":"挪威","norway":"挪威","芬蘭":"芬蘭","finland":"芬蘭","加拿大":"加拿大","canada":"加拿大",
+  "巴西":"巴西","brazil":"巴西","印度":"印度","india":"印度","泰國":"泰國","thailand":"泰國",
+  "越南":"越南","vietnam":"越南","印尼":"印尼","indonesia":"印尼","馬來西亞":"馬來西亞","malaysia":"馬來西亞",
+  "新加坡":"新加坡","singapore":"新加坡","韓國":"韓國","korea":"韓國","阿聯酋":"阿聯酋（UAE）","uae":"阿聯酋（UAE）",
+  "united arab emirates":"阿聯酋（UAE）","dubai":"杜拜（UAE）","杜拜":"杜拜（UAE）","沙烏地":"沙烏地","saudi":"沙烏地",
+  "南非":"南非","south africa":"南非","墨西哥":"墨西哥","mexico":"墨西哥","波蘭":"波蘭","poland":"波蘭",
+  "瑞士":"瑞士","switzerland":"瑞士","奧地利":"奧地利","austria":"奧地利","土耳其":"土耳其","turkey":"土耳其",
+  "丹麥":"丹麥","丹麥":"丹麥","歐洲":"歐洲","europe":"歐洲","中東":"中東","middle east":"中東"
+};
+
+/* 每個維度的關鍵字。hit=是否在信裡被提到 */
+var DIMS = [
+  { key:"model",  label:"型號／圖面",
+    kw:["型號","型機","產品型","圖面","圖紙","規格","cad","dxf","drawing","blueprint","spec","model","part number","p/n"] },
+  { key:"qty",   label:"數量",
+    kw:["數量","quantity","qty","pcs","pieces","units","ea","sets","多少個","幾個","訂購","採購","訂單","批量","大批","首單","試單"] },
+  { key:"country",label:"目標國家",
+    kw:Object.keys(COUNTRIES) },
+  { key:"due",   label:"希望交期",
+    kw:["交期","交貨","出貨","多久","何時","幾月","時程","deadline","lead time","delivery","shipment","shipping","schedule","第一季","第二季","第三季","第四季","年底","一個月","兩個月","三個月"] },
+  { key:"cert",  label:"要哪些認證文件",
+    kw:["認證","證書","證照","certificate","certification","compliance","compliant","nsf","wras","iso","ansi","rohs","reach","dvgw","省水標章","材質證明","測試報告","第三方"] },
+  { key:"price", label:"報價／價格",
+    kw:["價格","價錢","報價","多少錢","quote","quot","pricing","price","cost","單價","優惠","折扣","付款"] },
+  { key:"wty",  label:"保固／售後",
+    kw:["保固","保修","售後","warranty","repair","退貨","瑕疵","不良率","換新","維修"] }
+];
+
+function lower(s){ return s.toLowerCase(); }
+
+/* 找出信中出現的國家 */
+function findCountries(text){
+  var t = lower(text), found = [], names = [];
+  for (var k in COUNTRIES){
+    if (t.indexOf(k) !== -1){
+      names.push(k);
+      var cn = COUNTRIES[k];
+      if (found.indexOf(cn) === -1) found.push(cn);
+    }
+  }
+  return { found:found, matchedKeys:names };
+}
+
+function isMostlyEnglish(text){
+  var ascii=0, cjk=0;
+  for (var i=0;i<text.length;i++){
+    var c=text.charCodeAt(i);
+    if ((c>=65&&c<=90)||(c>=97&&c<=122)) ascii++;
+    else if (c>=0x4E00 && c<=0x9FFF) cjk++;
+  }
+  return ascii>25 && cjk<8;
+}
+
+/* 主要判讀函式 */
+function analyze(text){
+  var t = lower(text);
+  var status = {};
+  DIMS.forEach(function(d){
+    status[d.key] = d.kw.some(function(kw){ return t.indexOf(kw)!==-1; });
+  });
+  /* 額外：抓型號樣式，例如 LX-350、SC-800 */
+  var modelPat = /\b[a-z]{1,8}-?\d{2,4}\b/;
+  status.model = status.model || modelPat.test(t);
+  var cntries = findCountries(text);
+  status.country = status.country || cntries.found.length>0;
+  var result = { status:status, countries:cntries, english:isMostlyEnglish(text) };
+  return result;
+}
+
+/* --- ① 客戶問了什麼 --- */
+function whatTheyAsked(text, r){
+  var lines = [], st = r.status;
+  if (st.cert) lines.push("索取認證文件／法規合規證明" + (r.certDetail||""));
+  if (st.due)  lines.push("詢問交期／出貨時間");
+  if (st.qty)  lines.push("提出數量需求");
+  if (r.countries.found.length) lines.push("目標市場為：" + r.countries.found.join("、"));
+  if (st.model) lines.push("提到產品型號／圖面／規格");
+  if (st.price) lines.push("詢問報價／價格或付款條件");
+  if (st.wty)  lines.push("關心保固／售後／品質問題");
+  if (!lines.length){
+    if (r.english) lines.push("The letter is a general inquiry; no specific need keywords were detected. Please double-check the content.");
+    else lines.push("來信內容較一般，未偵測到明確需求關鍵字；請確認是否有漏貼內文。");
+  }
+  return lines;
+}
+
+/* --- ② 尚缺資料（五項為必備） --- */
+var REQUIRED = ["model","qty","country","due","cert"];
+function missingData(r){
+  var items = [];
+  REQUIRED.forEach(function(key){
+    var dim = DIMS.find(function(d){ return d.key===key; });
+    items.push({ key:key, label:dim.label, found:r.status[key] });
+  });
+  return items;
+}
+
+/* --- ③ 回信骨架 --- */
+function skeleton(text, r){
+  var st = r.status, en = r.english;
+  var out = [];
+
+  if (en){
+    out.push("Dear Sir/Madam, thank you for your inquiry.");
+  } else {
+    out.push("您好，感謝您的來信。");
+  }
+  out.push("");
+
+  /* 逐項：有的→確認；缺的→補問 */
+  REQUIRED.forEach(function(key){
+    var dim = DIMS.find(function(d){ return d.key===key; });
+    if (st[key]){
+      if (key==="country" && r.countries.found.length){
+        if (en) out.push("We note your target market: " + r.countries.found.join(", ") + ".");
+        else out.push("已收到您提到的目標市場：" + r.countries.found.join("、") + "。");
+      } else {
+        if (en) out.push("We have noted your reference to " + dim.label + ".");
+        else out.push("已收到您提到的「" + dim.label + "」。");
+      }
+    } else {
+      if (en){
+        var qEn = { model:"Could you provide the product model or drawing?",
+                    qty:"Could you advise the expected order quantity?",
+                    country:"Could you tell us the target country or market?",
+                    due:"Could you indicate your desired delivery / lead time?",
+                    cert:"Could you specify which certificates or standards are required?" };
+        out.push(qEn[key]);
+      } else {
+        var q = { model:"方便提供產品的型號或圖面嗎？（以便確認規格）",
+                  qty:"方便告知預計訂購數量嗎？",
+                  country:"方便告知目標國家或市場嗎？",
+                  due:"方便告知希望的出貨／交期時間嗎？",
+                  cert:"方便告知需要哪些認證文件或規範嗎？" };
+        out.push(q[key]);
+      }
+    }
+  });
+  out.push("");
+
+  /* 涉及認證 / 交期 / 價格：一律退回負責同仁確認 */
+  if (st.cert){ out.push(en ? "Regarding the requested certificates, our responsible colleagues will confirm the applicable scope before we provide them."
+                              : "關於您索取的認證文件，將由負責同仁確認適用範圍後再提供。"); }
+  if (st.due){ out.push(en ? "Lead time will be confirmed by our responsible colleagues after we receive the details."
+                           : "交期將由負責同仁確認後再回覆。"); }
+  if (st.price){ out.push(en ? "Pricing and terms will be confirmed by our responsible colleagues."
+                             : "價格與條件將由負責同仁確認後再回覆。"); }
+  out.push("");
+
+  out.push(en ? "Please feel free to provide the missing details above so we can move forward. Looking forward to working with you."
+              : "歡迎補充上述缺少的資訊，以便我們進一步為您評估。期待與您合作。");
+  return out.join("\n");
+}
+
+/* ---------------- 渲染 ---------------- */
+function render(text){
+  var r = analyze(text);
+  var boxWhat = document.getElementById("b-what");
+  var boxMiss = document.getElementById("b-missing");
+  var boxSk = document.getElementById("b-skeleton");
+
+  // ①
+  var w = whatTheyAsked(text, r);
+  boxWhat.innerHTML = "<h3>① 客戶問了什麼</h3><ul>" + w.map(function(x){ return "<li>"+x+"</li>"; }).join("") + "</ul>";
+
+  // ②
+  var miss = missingData(r);
+  var anyMissing = miss.some(function(m){ return !m.found; });
+  var missHtml = miss.map(function(m){
+    var cls = m.found ? "found" : "";
+    var txt = m.found ? ("已在信中提供：" + m.label) : ("尚未提到：" + m.label);
+    return "<li class=\""+cls+"\">"+txt+"</li>";
+  }).join("");
+  boxMiss.innerHTML = "<h3>② 還缺哪些資料</h3><ul class=\"missing\">" + missHtml + "</ul>" +
+    (anyMissing ? "" : "<div style=\"margin-top:6px;color:var(--ok);\">五項基本資料大致齊全，仍建議與窗口核對一次。</div>");
+
+  // ③
+  boxSk.innerHTML = "<h3>③ 回信骨架</h3><div class=\"skeleton\">" + skeleton(text, r).replace(/\n/g,"<br>") + "</div>" +
+    "<div class=\"caution-line\" style=\"margin-top:10px;\">※ 交期、價格、認證範圍由負責同仁確認後才對外。</div>";
+
+  document.getElementById("result").classList.add("show");
+}
+
+/* ---------------- 事件 ---------------- */
+var input = document.getElementById("input");
+document.getElementById("go").addEventListener("click", function(){
+  if (!input.value.trim()){ alert("請先貼入客戶來信內容。"); return; }
+  render(input.value);
+});
+document.getElementById("clear").addEventListener("click", function(){
+  input.value=""; document.getElementById("result").classList.remove("show");
+});
+input.addEventListener("keydown", function(e){
+  if ((e.ctrlKey||e.metaKey) && e.key==="Enter") e.preventDefault(), render(input.value);
+});
+document.querySelectorAll(".samples button").forEach(function(btn){
+  btn.addEventListener("click", function(){
+    input.value = SAMPLES[btn.getAttribute("data-sample")];
+    render(input.value);
+    input.scrollIntoView({behavior:"smooth", block:"center"});
+  });
+});
+</script>
+</body>
+</html>
